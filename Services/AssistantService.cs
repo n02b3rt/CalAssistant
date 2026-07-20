@@ -51,6 +51,13 @@ public class AssistantService : IDisposable
     public event Action? Changed;
     private void Raise() => Changed?.Invoke();
 
+    // Conflict-confirmation gate. The model may only force-create over a conflict if the SAME event
+    // (title + start) was flagged as conflicting on an EARLIER turn — this stops the model from
+    // silently retrying with force=true inside the same tool loop (which caused a double-booking).
+    private int _turn;
+    private int _pendingForceTurn = -1;
+    private string? _pendingForceSig;
+
     public AssistantService(IMaINHub hub, CalendarService calendar, Localizer loc, IConfiguration cfg, ILogger<AssistantService> log)
     {
         _hub = hub;
@@ -85,6 +92,7 @@ public class AssistantService : IDisposable
     /// <summary>Main entry: processes a user message and appends the assistant reply.</summary>
     public async Task<ChatMessage> SendAsync(string userText)
     {
+        _turn++;
         Messages.Add(new ChatMessage { Role = ChatRole.User, Text = userText });
         Busy = true;
         StatusKey = "status.thinking";
@@ -174,10 +182,10 @@ public class AssistantService : IDisposable
             "- list_day(date): show the user's schedule for a given day.\n" +
             "- check_availability(start, end): check whether a time range is free.\n" +
             "- create_event(title, start, end?, location?, reminder_minutes?, force?): create an event or reminder.\n\n" +
+            "TOOL CHOICE: If the user asks what is on their schedule/plan for a day, call list_day. " +
+            "If the user wants to add/schedule/book a meeting or set a reminder, call create_event. " +
+            "Do not call list_day when the user is trying to schedule something.\n\n" +
             "RULES — follow strictly:\n" +
-            "0. For ANY question about the user's schedule, plan, events, or what they have to do on a given day " +
-            "(today / tomorrow / 'dzisiaj' / 'jutro' / a specific date), you MUST call the list_day tool with that date. " +
-            "Never answer such questions from memory or from earlier messages — always call list_day.\n" +
             "1. NEVER invent or assume event details. To create an event you need at least: a TITLE, a DATE, and a START TIME. " +
             "If any of these is missing or unclear, ASK ONE short follow-up question and STOP — do not call create_event with guessed values.\n" +
             "2. When scheduling, you don't need to call check_availability yourself — create_event verifies conflicts. " +
@@ -329,22 +337,28 @@ public class AssistantService : IDisposable
                         end = start.AddHours(1);
                     if (end <= start) end = start.AddHours(1);
 
-                    // Conflict guard — don't double-book unless explicitly forced.
-                    if (!args.Force)
+                    // Conflict guard — don't double-book. force=true is honoured ONLY when this exact
+                    // event was flagged as conflicting on an EARLIER turn (i.e. the user has since confirmed).
+                    var sig = $"{args.Title.Trim()}|{start:yyyy-MM-ddTHH:mm}";
+                    var mayForce = args.Force && _pendingForceSig == sig && _pendingForceTurn >= 0 && _pendingForceTurn < _turn;
+                    if (!mayForce)
                     {
                         var conflicts = await _calendar.GetConflictsAsync(start, end);
                         if (conflicts.Count > 0)
                         {
+                            _pendingForceSig = sig;
+                            _pendingForceTurn = _turn; // flagged this turn — only forceable on a later turn
                             var clash = string.Join("; ", conflicts.Select(c => $"{c.TimeLabel} {c.Title}"));
                             return $"CONFLICT: the requested slot ({start:yyyy-MM-dd HH:mm}–{end:HH:mm}) overlaps with {clash}. " +
-                                   "Do NOT create it yet. Tell the user about the clash and ask whether to book anyway " +
-                                   "(then retry with force=true), choose another time, or cancel.";
+                                   "Do NOT create it. In ONE short sentence tell the user about the clash and ask whether to " +
+                                   "book it anyway, pick another time, or cancel. Do NOT call create_event again this turn.";
                         }
                     }
 
                     var created = await _calendar.CreateEventAsync(
                         args.Title, start, end, args.Location, reminderMinutes: args.ReminderMinutes);
                     onCreated(created);
+                    _pendingForceSig = null;
 
                     return $"SUCCESS: created \"{created.Title}\" on {start:yyyy-MM-dd HH:mm}–{end:HH:mm}" +
                            (args.ReminderMinutes is int rm ? $" with a {rm}-minute reminder" : "") + ".";
