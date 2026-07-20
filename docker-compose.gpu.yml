@@ -1,0 +1,22 @@
+# GPU override for bundled Ollama (NVIDIA only).
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bundled-ollama up --build
+#
+# Prerequisites (Windows):
+#   1. NVIDIA GPU + latest Game Ready / Studio driver
+#   2. Docker Desktop with WSL2 backend
+#   3. In WSL2 Ubuntu: sudo apt install nvidia-container-toolkit
+#   4. Docker Desktop → Settings → Resources → enable GPU if available
+#
+# Verify GPU inside container:
+#   docker exec calassistant-ollama nvidia-smi
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

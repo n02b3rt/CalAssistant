@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+
+# Local secrets / auth artifacts
+credentials.json
+token-store/
+
+# VCS / IDE
+.git/
+.vscode/
+.idea/
+.history/
+.vs/
+*.code-workspace
+
+# OS cruft
+Thumbs.db
+.DS_Store
+

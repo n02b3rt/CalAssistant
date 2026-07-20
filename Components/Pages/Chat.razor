@@ -1,0 +1,157 @@
+@page "/"
+@rendermode InteractiveServer
+@using System.Text
+@using CalAssistant.Models
+@using CalAssistant.Services
+@inject AssistantService Assistant
+@implements IDisposable
+
+<PageTitle>Calendar Assistant</PageTitle>
+
+<div class="app">
+    <aside class="side">
+        <div class="brand">
+            <div class="logo">CA</div>
+            <div>
+                <div class="brand-name">Calendar Assistant</div>
+                <div class="brand-sub">MaIN.NET · @AssistantService.ModelName · Ollama</div>
+            </div>
+        </div>
+
+        <div class="side-status">
+            @if (!Assistant.CalendarConfigured)
+            {
+                <span class="pill off"><span class="dot"></span> Missing credentials.json</span>
+            }
+            else if (Assistant.CalendarConnected)
+            {
+                <span class="pill ok"><span class="dot"></span> Calendar connected</span>
+            }
+            else
+            {
+                <span class="pill off"><span class="dot"></span> Not connected</span>
+                <button class="btn btn-primary" @onclick="Connect" disabled="@_connecting">
+                    @(_connecting ? "Connecting..." : "Connect calendar")
+                </button>
+            }
+            @if (_connectError is not null)
+            {
+                <div class="err">@_connectError</div>
+            }
+        </div>
+
+        <div class="side-help">
+            <h4>What I can do</h4>
+            <ul>
+                <li>"what do I have today?"</li>
+                <li>"what's my schedule tomorrow?"</li>
+                <li>"schedule a meeting with Kate tomorrow at 3pm"</li>
+                <li>"remind me about meds at 9pm"</li>
+            </ul>
+            @if (!Assistant.CalendarConfigured)
+            {
+                <div class="setup">
+                    <h4>Google setup</h4>
+                    <ol>
+                        <li>Google Cloud → enable <b>Calendar API</b></li>
+                        <li>Create <b>OAuth Client ID</b> type <b>Desktop</b></li>
+                        <li>Save the downloaded file as <code>credentials.json</code> in the project root</li>
+                        <li>Restart the app and click "Connect calendar"</li>
+                    </ol>
+                    <small>See README.md for details</small>
+                </div>
+            }
+        </div>
+    </aside>
+
+    <main class="chat">
+        <div class="messages" @ref="_messagesEl">
+            @foreach (var m in Assistant.Messages)
+            {
+                <div class="msg @(m.Role == ChatRole.User ? "user" : "bot")">
+                    @if (m.Role == ChatRole.Assistant)
+                    {
+                        <div class="avatar">AI</div>
+                    }
+                    <div class="bubble">
+                        <div class="text">@((MarkupString)Format(m.Text))</div>
+                        @if (m.Day is not null)
+                        {
+                            <DayTimeline Plan="m.Day" />
+                        }
+                    </div>
+                </div>
+            }
+            @if (Assistant.Busy)
+            {
+                <div class="msg bot">
+                    <div class="avatar">AI</div>
+                    <div class="bubble typing"><span></span><span></span><span></span></div>
+                </div>
+            }
+        </div>
+
+        <div class="composer">
+            <input class="input" @bind="_input" @bind:event="oninput"
+                   @onkeydown="OnKey" placeholder="Type a message..." disabled="@Assistant.Busy" />
+            <button class="btn btn-primary send" @onclick="Send"
+                    disabled="@(Assistant.Busy || string.IsNullOrWhiteSpace(_input))">
+                Send
+            </button>
+        </div>
+    </main>
+</div>
+
+@code {
+    private string _input = "";
+    private bool _connecting;
+    private string? _connectError;
+    private ElementReference _messagesEl;
+
+    protected override void OnInitialized() => Assistant.Changed += OnChanged;
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private async Task Send()
+    {
+        var text = _input.Trim();
+        if (string.IsNullOrEmpty(text) || Assistant.Busy) return;
+        _input = "";
+        await Assistant.SendAsync(text);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await Send();
+    }
+
+    private async Task Connect()
+    {
+        _connecting = true;
+        _connectError = null;
+        try
+        {
+            await Assistant.ConnectCalendarAsync();
+        }
+        catch (Exception ex)
+        {
+            _connectError = ex.Message;
+        }
+        finally
+        {
+            _connecting = false;
+        }
+    }
+
+    public void Dispose() => Assistant.Changed -= OnChanged;
+
+    // Lightweight formatter: **bold**, *italic*, newlines -> <br>. Encode first for safety.
+    private static string Format(string text)
+    {
+        var sb = new StringBuilder(System.Net.WebUtility.HtmlEncode(text));
+        sb.Replace("\r\n", "\n").Replace("\n", "<br/>");
+        var s = System.Text.RegularExpressions.Regex.Replace(sb.ToString(), @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "<em>$1</em>");
+        return s;
+    }
+}

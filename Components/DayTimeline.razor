@@ -1,0 +1,77 @@
+@using CalAssistant.Models
+@using System.Globalization
+
+<div class="day-card">
+    <div class="day-head">
+        <div class="day-date">
+            <span class="day-name">@Capitalize(Plan.Date.ToString("dddd", En))</span>
+            <span class="day-full">@Plan.Date.ToString("MMMM d, yyyy", En)</span>
+        </div>
+        <div class="day-stats">
+            <div class="stat"><b>@Plan.Count</b><span>@EventsWord(Plan.Count)</span></div>
+            @if (Plan.TotalHours > 0)
+            {
+                <div class="stat"><b>@Plan.TotalHours.ToString("0.#", En)h</b><span>booked</span></div>
+            }
+        </div>
+    </div>
+
+    @if (Plan.Count == 0)
+    {
+        <div class="day-empty">Free day — no events</div>
+    }
+    else
+    {
+        @if (Plan.Next is { } next)
+        {
+            <div class="next-up">Up next: <b>@next.Title</b> at @next.Start?.ToString("HH:mm")</div>
+        }
+        <div class="timeline">
+            @foreach (var e in Plan.Events)
+            {
+                var color = ColorFor(e.Title);
+                <div class="tl-row">
+                    <div class="tl-time">
+                        @if (e.AllDay)
+                        {
+                            <span class="allday">all<br/>day</span>
+                        }
+                        else
+                        {
+                            <span class="t-start">@e.Start?.ToString("HH:mm")</span>
+                            <span class="t-end">@e.End?.ToString("HH:mm")</span>
+                        }
+                    </div>
+                    <div class="tl-rail"><span class="tl-dot" style="background:@color"></span></div>
+                    <div class="tl-body" style="border-left:3px solid @color">
+                        <div class="tl-title">@e.Title</div>
+                        @if (!string.IsNullOrWhiteSpace(e.Location))
+                        {
+                            <div class="tl-meta">@e.Location</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DayPlan Plan { get; set; } = default!;
+
+    private static readonly CultureInfo En = CultureInfo.GetCultureInfo("en-US");
+    private static readonly string[] Palette =
+        { "#6d7bff", "#37d6a9", "#ff9f43", "#ff6b9d", "#9a6dff", "#4dd0e1", "#f6c445" };
+
+    private static string ColorFor(string s)
+    {
+        var h = 0;
+        foreach (var c in s) h = (h * 31 + c) & 0x7fffffff;
+        return Palette[h % Palette.Length];
+    }
+
+    private static string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0], En) + s[1..];
+
+    private static string EventsWord(int n) => n == 1 ? "event" : "events";
+}

@@ -1,0 +1,133 @@
+# CalAssistant — .gitignore
+
+## Secrets & OAuth (NEVER commit) -------------------------------------------
+
+credentials.json
+**/credentials.json
+*client_secret*.json
+google-credentials.json
+token-store/
+**/token-store/
+
+# Environment / user secrets
+.env
+.env.*
+!.env.example
+*.env.local
+secrets.json
+*.secrets.json
+appsettings.*.local.json
+appsettings.Local.json
+appsettings.Production.json
+
+## .NET build output --------------------------------------------------------
+
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+artifacts/
+publish/
+[Pp]ublish/
+
+## NuGet --------------------------------------------------------------------
+
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+project.lock.json
+project.fragment.lock.json
+
+## MSBuild / tooling --------------------------------------------------------
+
+*.binlog
+*.log
+*.tlog
+*.cache
+*.pidb
+*.svclog
+*.scc
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pubxml
+*.publishproj
+*.[Pp]ublish.xml
+PublishScripts/
+ScaffoldingReadMe.txt
+
+## Certificates & keys ------------------------------------------------------
+
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+
+## IDE ----------------------------------------------------------------------
+
+.vs/
+.idea/
+.history/
+.localhistory/
+.vshistory/
+.vspscc
+.vssscc
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+.cursor/
+
+# VS Code — ignore personal settings, keep shared workspace config if added
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+## OS -----------------------------------------------------------------------
+
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+*~
+~$*
+
+## Temp & backup ------------------------------------------------------------
+
+*.tmp
+*.temp
+*.bak
+*.bak.*
+*.bak.txt
+*.orig
+*.swp
+*.swo
+
+## Test & coverage ----------------------------------------------------------
+
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+BenchmarkDotNet.Artifacts/
+TestResult.xml
+nunit-*.xml
