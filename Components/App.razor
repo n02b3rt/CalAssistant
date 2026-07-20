@@ -16,6 +16,13 @@
     <Routes />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script>
+        window.calAssist = {
+            scrollToBottom: function (el) {
+                if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            }
+        };
+    </script>
 </body>
 
 </html>

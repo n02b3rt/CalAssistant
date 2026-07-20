@@ -27,6 +27,7 @@ builder.Services.AddMaIN(builder.Configuration, options =>
 
 // Our services
 builder.Services.AddSingleton<CalendarService>();      // single user → singleton
+builder.Services.AddScoped<Localizer>();               // selected UI language per circuit
 builder.Services.AddScoped<AssistantService>();        // conversation state per Blazor circuit
 
 var app = builder.Build();

@@ -1,18 +1,36 @@
 :root {
-    --bg: #0f1220;
-    --bg-2: #151a2e;
-    --panel: #1a2038;
-    --panel-2: #212a49;
-    --border: #2a3358;
-    --text: #e8ecf8;
-    --muted: #97a0c4;
-    --brand: #6d7bff;
-    --brand-2: #9a6dff;
-    --accent: #37d6a9;
-    --danger: #ff6b6b;
-    --shadow: 0 10px 30px rgba(0,0,0,.35);
-    --radius: 16px;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* Surfaces — warm, paper-like light theme */
+    --bg: #f4f4f1;
+    --bg-soft: #efefeb;
+    --surface: #ffffff;
+    --surface-2: #fafaf8;
+    --border: #e7e7e1;
+    --border-strong: #dcdcd4;
+
+    /* Ink & text */
+    --ink: #1f2124;
+    --text: #24262a;
+    --text-soft: #4c5057;
+    --text-muted: #8b9099;
+
+    /* One restrained accent (calm green) + semantics */
+    --accent: #1f8a5b;
+    --accent-strong: #157049;
+    --accent-soft: #e8f2ec;
+    --busy: #b9743a;
+    --busy-soft: #f6ece2;
+    --danger: #cc5646;
+
+    --shadow-xs: 0 1px 2px rgba(24,26,29,.05);
+    --shadow-sm: 0 1px 2px rgba(24,26,29,.05), 0 2px 6px rgba(24,26,29,.05);
+    --shadow-md: 0 4px 12px rgba(24,26,29,.06), 0 16px 40px rgba(24,26,29,.06);
+
+    --radius: 18px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+
+    --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -20,49 +38,64 @@
 html, body {
     margin: 0;
     height: 100%;
-    background: radial-gradient(1200px 800px at 80% -10%, #23305e 0%, transparent 55%),
-                radial-gradient(1000px 700px at -10% 110%, #2a1f52 0%, transparent 50%),
-                var(--bg);
     color: var(--text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background-color: var(--bg);
+    /* Barely-there dot texture — reads as premium paper, not an AI gradient. */
+    background-image: radial-gradient(circle, rgba(31,33,36,.028) 1px, transparent 1.4px);
+    background-size: 22px 22px;
 }
 
-a { color: var(--brand); }
+a { color: var(--accent-strong); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-h1:focus { outline: none; }
+::selection { background: var(--accent-soft); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2c3763; border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: #d7d7cf; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #c7c7bd; background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ---- Blazor error UI ---- */
 #blazor-error-ui {
-    color: #fff; background: #b32121; position: fixed; bottom: 0; left: 0; right: 0;
-    padding: .8rem 1.2rem; display: none; z-index: 1000;
+    color: #fff; background: #2a2c30; position: fixed; bottom: 0; left: 0; right: 0;
+    padding: .7rem 1.1rem; display: none; z-index: 1000; box-shadow: var(--shadow-md);
 }
 #blazor-error-ui .dismiss { cursor: pointer; float: right; }
-.blazor-error-boundary { background: #b32121; padding: 1rem; color: white; border-radius: 8px; }
-.blazor-error-boundary::after { content: "Wystąpił błąd."; }
+.blazor-error-boundary { background: #2a2c30; color: #fff; padding: 1rem; border-radius: 10px; }
+.blazor-error-boundary::after { content: "An unexpected error occurred."; }
 
-/* ---- Reusable ---- */
+/* ---- Buttons ---- */
 .btn {
-    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-    padding: .55rem .9rem; border-radius: 10px; cursor: pointer; font-size: .9rem;
-    transition: transform .06s ease, background .15s ease, border-color .15s ease;
+    font: inherit; font-weight: 600; font-size: .9rem;
+    border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+    padding: .55rem .95rem; border-radius: var(--radius-sm); cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, transform .05s ease, box-shadow .15s ease;
+    box-shadow: var(--shadow-xs);
 }
-.btn:hover { background: #2a3564; }
+.btn:hover { background: var(--surface-2); border-color: #cfcfc6; }
 .btn:active { transform: translateY(1px); }
-.btn-primary {
-    background: linear-gradient(135deg, var(--brand), var(--brand-2));
-    border: none; color: white; font-weight: 600;
-}
-.btn-primary:hover { filter: brightness(1.07); background: linear-gradient(135deg, var(--brand), var(--brand-2)); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
-.pill {
-    display: inline-flex; align-items: center; gap: .4rem;
-    padding: .25rem .6rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
-    border: 1px solid var(--border);
+.btn-primary {
+    background: var(--ink); color: #fff; border-color: var(--ink);
 }
-.pill.ok  { color: var(--accent); background: rgba(55,214,169,.1); border-color: rgba(55,214,169,.35); }
-.pill.off { color: var(--muted); background: rgba(151,160,196,.08); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.btn-primary:hover { background: #34373c; border-color: #34373c; }
+
+.btn-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-soft); }
+.btn-ghost:hover { background: var(--bg-soft); border-color: var(--border); }
+
+/* ---- Pills ---- */
+.pill {
+    display: inline-flex; align-items: center; gap: .45rem;
+    padding: .3rem .65rem; border-radius: 999px; font-size: .78rem; font-weight: 600;
+    border: 1px solid var(--border); background: var(--surface);
+}
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.ok  { color: var(--accent-strong); background: var(--accent-soft); border-color: #cfe6d9; }
+.pill.off { color: var(--text-muted); }

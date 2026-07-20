@@ -1,53 +1,91 @@
 @using CalAssistant.Models
-@using System.Globalization
+@using CalAssistant.Services
+@inject Localizer Loc
 
 <div class="day-card">
     <div class="day-head">
         <div class="day-date">
-            <span class="day-name">@Capitalize(Plan.Date.ToString("dddd", En))</span>
-            <span class="day-full">@Plan.Date.ToString("MMMM d, yyyy", En)</span>
+            <span class="day-name">@Capitalize(Plan.Date.ToString("dddd", Loc.Culture))</span>
+            <span class="day-full">@Plan.Date.ToString(Loc.Lang == AppLang.Pl ? "d MMMM yyyy" : "MMMM d, yyyy", Loc.Culture)</span>
         </div>
-        <div class="day-stats">
-            <div class="stat"><b>@Plan.Count</b><span>@EventsWord(Plan.Count)</span></div>
-            @if (Plan.TotalHours > 0)
-            {
-                <div class="stat"><b>@Plan.TotalHours.ToString("0.#", En)h</b><span>booked</span></div>
-            }
-        </div>
+        @if (Plan.Count > 0)
+        {
+            <div class="day-stats">
+                <div class="stat">
+                    <span class="stat-num">@Plan.Count</span>
+                    <span class="stat-lbl">@EventsWord(Plan.Count)</span>
+                </div>
+                @if (Plan.TotalHours > 0)
+                {
+                    <div class="stat">
+                        <span class="stat-num">@Plan.TotalHours.ToString("0.#", Loc.Culture)h</span>
+                        <span class="stat-lbl">@Loc["dt.booked"]</span>
+                    </div>
+                }
+            </div>
+        }
     </div>
 
     @if (Plan.Count == 0)
     {
-        <div class="day-empty">Free day — no events</div>
+        <div class="day-empty">
+            <span class="empty-glyph">◍</span>
+            <span>@Loc["dt.freeDay"]</span>
+        </div>
     }
     else
     {
+        @if (_timed.Count > 0)
+        {
+            <div class="rail">
+                <div class="rail-track">
+                    @foreach (var e in _timed)
+                    {
+                        <div class="rail-block" style="left:@Pct(e.Start!.Value)%;width:@Width(e)%;--c:@ColorFor(e.Title)"
+                             title="@e.TimeLabel @e.Title"></div>
+                    }
+                    @if (_nowPct is double np)
+                    {
+                        <div class="rail-now" style="left:@np.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)%"></div>
+                    }
+                </div>
+                <div class="rail-ticks">
+                    @foreach (var h in _ticks)
+                    {
+                        <span class="tick" style="left:@TickPct(h)%">@h:00</span>
+                    }
+                </div>
+            </div>
+        }
+
         @if (Plan.Next is { } next)
         {
-            <div class="next-up">Up next: <b>@next.Title</b> at @next.Start?.ToString("HH:mm")</div>
+            <div class="next-up">
+                <span class="next-lbl">@Loc["dt.nextUp"]</span>
+                <span class="next-body"><b>@next.Title</b> · @next.Start?.ToString("HH:mm")</span>
+            </div>
         }
-        <div class="timeline">
+
+        <div class="events">
             @foreach (var e in Plan.Events)
             {
-                var color = ColorFor(e.Title);
-                <div class="tl-row">
-                    <div class="tl-time">
+                <div class="ev" style="--c:@ColorFor(e.Title)">
+                    <div class="ev-time">
                         @if (e.AllDay)
                         {
-                            <span class="allday">all<br/>day</span>
+                            <span class="ev-allday">@Loc["dt.allDay"]</span>
                         }
                         else
                         {
-                            <span class="t-start">@e.Start?.ToString("HH:mm")</span>
-                            <span class="t-end">@e.End?.ToString("HH:mm")</span>
+                            <span class="ev-start">@e.Start?.ToString("HH:mm")</span>
+                            <span class="ev-end">@e.End?.ToString("HH:mm")</span>
                         }
                     </div>
-                    <div class="tl-rail"><span class="tl-dot" style="background:@color"></span></div>
-                    <div class="tl-body" style="border-left:3px solid @color">
-                        <div class="tl-title">@e.Title</div>
+                    <div class="ev-body">
+                        <div class="ev-title">@e.Title</div>
                         @if (!string.IsNullOrWhiteSpace(e.Location))
                         {
-                            <div class="tl-meta">@e.Location</div>
+                            <div class="ev-meta">@e.Location</div>
                         }
                     </div>
                 </div>
@@ -59,9 +97,64 @@
 @code {
     [Parameter, EditorRequired] public DayPlan Plan { get; set; } = default!;
 
-    private static readonly CultureInfo En = CultureInfo.GetCultureInfo("en-US");
+    private List<CalEvent> _timed = new();
+    private double _windowStart = 7, _windowEnd = 22;
+    private int[] _ticks = Array.Empty<int>();
+    private double? _nowPct;
+
+    // Soft, desaturated palette — pleasant on white, no neon.
     private static readonly string[] Palette =
-        { "#6d7bff", "#37d6a9", "#ff9f43", "#ff6b9d", "#9a6dff", "#4dd0e1", "#f6c445" };
+        { "#3f7d6a", "#b0794f", "#5f6f92", "#a86a80", "#4a8f8a", "#9a8248" };
+
+    protected override void OnParametersSet()
+    {
+        _timed = Plan.Events
+            .Where(e => !e.AllDay && e.Start.HasValue && e.End.HasValue)
+            .OrderBy(e => e.Start)
+            .ToList();
+
+        if (_timed.Count > 0)
+        {
+            var earliest = _timed.Min(e => e.Start!.Value.TimeOfDay.TotalHours);
+            var latest = _timed.Max(e => e.End!.Value.TimeOfDay.TotalHours);
+            _windowStart = Math.Clamp(Math.Min(7, Math.Floor(earliest)), 0, 23);
+            _windowEnd = Math.Clamp(Math.Max(21, Math.Ceiling(latest)), _windowStart + 1, 24);
+
+            var span = _windowEnd - _windowStart;
+            var step = span > 12 ? 4 : span > 6 ? 3 : 2;
+            var ticks = new List<int>();
+            for (var h = (int)_windowStart; h <= _windowEnd; h += step) ticks.Add(h);
+            _ticks = ticks.ToArray();
+
+            if (Plan.Date.Date == DateTime.Today)
+            {
+                var nowH = DateTime.Now.TimeOfDay.TotalHours;
+                if (nowH >= _windowStart && nowH <= _windowEnd)
+                    _nowPct = (nowH - _windowStart) / span * 100;
+            }
+        }
+    }
+
+    private string Pct(DateTime dt)
+    {
+        var span = _windowEnd - _windowStart;
+        var p = Math.Clamp((dt.TimeOfDay.TotalHours - _windowStart) / span * 100, 0, 100);
+        return p.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string Width(CalEvent e)
+    {
+        var span = _windowEnd - _windowStart;
+        var w = (e.End!.Value - e.Start!.Value).TotalHours / span * 100;
+        return Math.Clamp(w, 1.5, 100).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private string TickPct(int h)
+    {
+        var span = _windowEnd - _windowStart;
+        return Math.Clamp((h - _windowStart) / span * 100, 0, 100)
+            .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     private static string ColorFor(string s)
     {
@@ -70,8 +163,14 @@
         return Palette[h % Palette.Length];
     }
 
-    private static string Capitalize(string s) =>
-        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0], En) + s[1..];
+    private string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0], Loc.Culture) + s[1..];
 
-    private static string EventsWord(int n) => n == 1 ? "event" : "events";
+    private string EventsWord(int n)
+    {
+        if (Loc.Lang == AppLang.En) return n == 1 ? "event" : "events";
+        if (n == 1) return "wydarzenie";
+        var last = n % 10; var tens = n % 100;
+        return (last is >= 2 and <= 4 && tens is < 12 or > 14) ? "wydarzenia" : "wydarzeń";
+    }
 }

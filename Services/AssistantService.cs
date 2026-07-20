@@ -21,7 +21,7 @@ namespace CalAssistant.Services;
 ///  - The model must NOT invent event details; missing info triggers a follow-up question.
 ///  - create_event checks the calendar for conflicts first (C#-side, deterministic).
 /// </summary>
-public class AssistantService
+public class AssistantService : IDisposable
 {
     /// <summary>Fallback model when Assistant:Model config is absent.</summary>
     public const string DefaultModel = "qwen3:1.7b";
@@ -34,32 +34,45 @@ public class AssistantService
 
     private readonly IMaINHub _hub;
     private readonly CalendarService _calendar;
+    private readonly Localizer _loc;
     private readonly ILogger<AssistantService> _log;
     private readonly string _modelName;
+    private readonly ChatMessage _greeting;
 
     // Cap history sent to the model (keeps 1.7b within its context window).
     private const int MaxHistoryMessages = 14;
 
     public List<ChatMessage> Messages { get; } = new();
     public bool Busy { get; private set; }
+
+    /// <summary>Localization key describing what the assistant is doing right now (live status feedback).</summary>
+    public string StatusKey { get; private set; } = "status.thinking";
+
     public event Action? Changed;
     private void Raise() => Changed?.Invoke();
 
-    public AssistantService(IMaINHub hub, CalendarService calendar, IConfiguration cfg, ILogger<AssistantService> log)
+    public AssistantService(IMaINHub hub, CalendarService calendar, Localizer loc, IConfiguration cfg, ILogger<AssistantService> log)
     {
         _hub = hub;
         _calendar = calendar;
+        _loc = loc;
         _log = log;
         _modelName = cfg["Assistant:Model"] ?? DefaultModel;
 
-        Messages.Add(new ChatMessage
-        {
-            Role = ChatRole.Assistant,
-            Text = "Hi! I'm your calendar assistant 🗓️ I can show your day, schedule meetings (checking you're " +
-                   "actually free first), and set reminders. Try *\"what do I have today?\"* or *\"schedule a meeting " +
-                   "with Kate tomorrow at 3pm\"*. I answer in whatever language you write in."
-        });
+        _greeting = new ChatMessage { Role = ChatRole.Assistant, Text = _loc["assistant.greeting"] };
+        Messages.Add(_greeting);
+
+        _loc.Changed += OnLanguageChanged;
     }
+
+    private void OnLanguageChanged()
+    {
+        // Re-localize the greeting in place so the first bubble follows the language toggle.
+        _greeting.Text = _loc["assistant.greeting"];
+        Raise();
+    }
+
+    public void Dispose() => _loc.Changed -= OnLanguageChanged;
 
     /// <summary>The model actually in use (for display in the UI).</summary>
     public string ModelName => _modelName;
@@ -74,6 +87,7 @@ public class AssistantService
     {
         Messages.Add(new ChatMessage { Role = ChatRole.User, Text = userText });
         Busy = true;
+        StatusKey = "status.thinking";
         Raise();
 
         ChatMessage reply;
@@ -84,24 +98,12 @@ public class AssistantService
         catch (OperationCanceledException)
         {
             _log.LogWarning("Turn timed out after {Sec}s", ResponseTimeoutSeconds);
-            reply = new ChatMessage
-            {
-                Role = ChatRole.Assistant,
-                Text = DetectLanguage(userText) == "Polish"
-                    ? "To zajęło zbyt długo ⏳ Spróbuj jeszcze raz albo sformułuj krócej."
-                    : "That took too long ⏳ Please try again or phrase it more briefly."
-            };
+            reply = new ChatMessage { Role = ChatRole.Assistant, Text = _loc["err.timeout"] };
         }
         catch (Exception ex)
         {
             _log.LogError(ex, "Failed to process message");
-            reply = new ChatMessage
-            {
-                Role = ChatRole.Assistant,
-                Text = DetectLanguage(userText) == "Polish"
-                    ? "Coś poszło nie tak przy przetwarzaniu. Spróbuj ująć to inaczej."
-                    : "Something went wrong while processing that. Please try rephrasing."
-            };
+            reply = new ChatMessage { Role = ChatRole.Assistant, Text = _loc["err.generic"] };
         }
         finally
         {
@@ -119,9 +121,7 @@ public class AssistantService
         DayPlan? dayPlanResult = null;
         CalEvent? createdEventResult = null;
 
-        var lastUser = Messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
-        var language = DetectLanguage(lastUser);
-
+        var language = _loc.LanguageName;
         var system = BuildSystemPrompt(now, language);
         var tools = BuildTools(
             onDayPlan: p => dayPlanResult = p,
@@ -136,7 +136,7 @@ public class AssistantService
             .WithSystemPrompt(system)
             .WithInferenceParams(new OllamaInferenceParams
             {
-                Temperature = 0.2f,
+                Temperature = 0.15f,
                 // Cap generation so a small model can't run away (bounds latency and stops repetition loops).
                 MaxTokens = 500,
                 // Disable Qwen3 "thinking" — huge latency win, and we don't surface reasoning anyway.
@@ -144,7 +144,7 @@ public class AssistantService
             })
             .WithTools(tools)
             .DisableCache()
-            .CompleteAsync(cancellationToken: cts.Token);
+            .CompleteAsync(cancellationToken: cts.Token, toolCallback: OnToolInvoked);
 
         var text = CleanReply(result.Message.Content);
         // For created events, ALWAYS use a deterministic confirmation — small models often
@@ -175,6 +175,9 @@ public class AssistantService
             "- check_availability(start, end): check whether a time range is free.\n" +
             "- create_event(title, start, end?, location?, reminder_minutes?, force?): create an event or reminder.\n\n" +
             "RULES — follow strictly:\n" +
+            "0. For ANY question about the user's schedule, plan, events, or what they have to do on a given day " +
+            "(today / tomorrow / 'dzisiaj' / 'jutro' / a specific date), you MUST call the list_day tool with that date. " +
+            "Never answer such questions from memory or from earlier messages — always call list_day.\n" +
             "1. NEVER invent or assume event details. To create an event you need at least: a TITLE, a DATE, and a START TIME. " +
             "If any of these is missing or unclear, ASK ONE short follow-up question and STOP — do not call create_event with guessed values.\n" +
             "2. When scheduling, you don't need to call check_availability yourself — create_event verifies conflicts. " +
@@ -186,20 +189,21 @@ public class AssistantService
             "6. Be concise and warm. Confirm what you did in one or two sentences.";
     }
 
-    private static readonly string[] PolishHints =
+    /// <summary>
+    /// Live status feedback: MaIN calls this when the model invokes a tool. We map the tool to a
+    /// plain-language status so the user sees what's actually happening (not just a spinner).
+    /// </summary>
+    private Task OnToolInvoked(ToolInvocation inv)
     {
-        " co ", " jak ", " mam ", " dzis", " dziś", " jutro", " pojutrze", " spotkanie", " spotkania",
-        " przypomnij", " zaplanuj", " umów", " umow", " tydzień", " tydzien", " godzin", " nie ", " tak ",
-        " czy ", " kiedy ", " wolne", " zajęte", " kalendarz"
-    };
-
-    /// <summary>Cheap, deterministic PL/EN detection so a small model reliably replies in the user's language.</summary>
-    private static string DetectLanguage(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return "English";
-        if (Regex.IsMatch(text, "[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]")) return "Polish";
-        var padded = " " + text.ToLowerInvariant() + " ";
-        return PolishHints.Any(padded.Contains) ? "Polish" : "English";
+        StatusKey = inv.ToolName switch
+        {
+            "list_day"           => "status.reading",
+            "check_availability" => "status.checking",
+            "create_event"       => "status.creating",
+            _                    => "status.writing"
+        };
+        Raise();
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -382,7 +386,9 @@ public class AssistantService
                 ? $"Masz {day.Count} {(day.Count == 1 ? "wydarzenie" : "wydarzeń")} tego dnia — szczegóły poniżej."
                 : $"You have {day.Count} event(s) that day — details below.";
         }
-        return pl ? "Zrobione." : "Done.";
+        return pl
+            ? "Hmm, nie jestem pewien, co dokładnie zrobić — możesz doprecyzować?"
+            : "Hmm, I'm not sure what to do exactly — could you clarify?";
     }
 
     private sealed class DateArgs { public string? Date { get; set; } }

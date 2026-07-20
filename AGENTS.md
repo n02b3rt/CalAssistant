@@ -85,10 +85,25 @@ Chat.razor renders DayTimeline when the message carries a DayPlan.
 
 | Component | Responsibility |
 |---|---|
-| `AssistantService` | Orchestration, tool registration, conversation state, language, generation limits (Scoped) |
+| `AssistantService` | Orchestration, tool registration, conversation state, generation limits, live status (Scoped) |
 | `CalendarService` | **Only** place with Google Calendar operations — OAuth, read, create, conflict lookup (Singleton) |
+| `Localizer` | PL/EN UI strings + selected language; drives both chrome and the assistant's reply language (Scoped) |
 | `DayTimeline.razor` | Day visualization from real API data — never from model output |
 | LLM model | Language understanding, tool selection, wording |
+
+### UI / UX
+
+- **Light theme** (`wwwroot/app.css`): warm off-white + subtle dot texture, hairline borders, one calm green
+  accent, ink primary buttons. No gradients. CSS variables drive everything.
+- **Bilingual (PL/EN)** via `Localizer` — a `PL | EN` segmented toggle in the chat header switches the whole UI
+  *and* the assistant's reply language live (`Localizer.LanguageName` → system prompt). Add UI text as keys in
+  `Localizer.Pl` / `Localizer.En`, never hard-code strings in components.
+- **Live status** (not just a spinner): `AssistantService.StatusKey` updates as work happens. MaIN's
+  `CompleteAsync(toolCallback: OnToolInvoked)` fires per tool call → mapped to a plain-language status
+  (`status.reading` / `status.checking` / `status.creating`). The busy bubble shows `Loc[StatusKey]`.
+- **DayTimeline**: header (weekday + localized date) · stat tiles · a horizontal "day rail" busy strip with a
+  now-marker · "next up" · event cards with soft per-title colors (`color-mix`). Culture from `Localizer.Culture`.
+- Auto-scroll via a tiny JS helper (`calAssist.scrollToBottom` in `App.razor`).
 
 ---
 
@@ -227,14 +242,15 @@ Summary — full steps in `README.md`:
 ## Roadmap / TODO
 
 - [ ] `update_event` / `delete_event` tools ("przełóż spotkanie na 17", "odwołaj call").
-- [ ] Streaming replies (`CompleteAsync(changeOfValue: …)`) for a live-typing feel.
-- [ ] Week / date-range view.
-- [ ] Localize `DayTimeline` static labels (currently English: "event", "booked", "Free day", "Up next").
+- [ ] Streaming the final reply token-by-token (`CompleteAsync(changeOfValue: …)`) on top of the phase status.
+- [ ] Week / date-range view (reuse `DayTimeline` per day).
 - [ ] Smarter relative-date parsing fallback in C# (belt-and-suspenders for the model).
 - [ ] Multi-user support (today `CalendarService` is a singleton = one user/token).
 - [ ] Recurring events, time-zone awareness, natural-language reminders ("na godzinę przed").
+- [ ] Persist the selected language (localStorage) across reloads.
 
-Done recently: multi-turn memory, slot-filling, conflict detection, PL/EN, GPU-fit model, latency bounds.
+Done recently: light redesign, PL/EN UI + localized DayTimeline, live phase status, multi-turn memory,
+slot-filling, conflict detection, GPU-fit model, latency bounds.
 
 ---
 

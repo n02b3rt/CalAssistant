@@ -4,100 +4,123 @@
 @using CalAssistant.Models
 @using CalAssistant.Services
 @inject AssistantService Assistant
+@inject Localizer Loc
+@inject IJSRuntime JS
 @implements IDisposable
 
-<PageTitle>Calendar Assistant</PageTitle>
+<PageTitle>@Loc["app.title"]</PageTitle>
 
 <div class="app">
     <aside class="side">
         <div class="brand">
-            <div class="logo">CA</div>
-            <div>
-                <div class="brand-name">Calendar Assistant</div>
-                <div class="brand-sub">MaIN.NET · @Assistant.ModelName · Ollama</div>
+            <div class="logo">@CalendarIcon</div>
+            <div class="brand-txt">
+                <div class="brand-name">@Loc["brand.name"]</div>
+                <div class="brand-tag">@Loc["brand.tag"]</div>
             </div>
         </div>
 
-        <div class="side-status">
-            @if (!Assistant.CalendarConfigured)
+        <div class="suggest">
+            <div class="suggest-title">@Loc["suggestions.title"]</div>
+            @foreach (var s in Loc.Suggestions)
             {
-                <span class="pill off"><span class="dot"></span> Missing credentials.json</span>
-            }
-            else if (Assistant.CalendarConnected)
-            {
-                <span class="pill ok"><span class="dot"></span> Calendar connected</span>
-            }
-            else
-            {
-                <span class="pill off"><span class="dot"></span> Not connected</span>
-                <button class="btn btn-primary" @onclick="Connect" disabled="@_connecting">
-                    @(_connecting ? "Connecting..." : "Connect calendar")
+                <button class="chip" @onclick="() => SendText(s)" disabled="@Assistant.Busy">
+                    <span>@s</span>
+                    <span class="chip-arrow">↗</span>
                 </button>
-            }
-            @if (_connectError is not null)
-            {
-                <div class="err">@_connectError</div>
             }
         </div>
 
-        <div class="side-help">
-            <h4>What I can do</h4>
-            <ul>
-                <li>"what do I have today?"</li>
-                <li>"what's my schedule tomorrow?"</li>
-                <li>"schedule a meeting with Kate tomorrow at 3pm"</li>
-                <li>"remind me about meds at 9pm"</li>
-            </ul>
-            @if (!Assistant.CalendarConfigured)
-            {
-                <div class="setup">
-                    <h4>Google setup</h4>
-                    <ol>
-                        <li>Google Cloud → enable <b>Calendar API</b></li>
-                        <li>Create <b>OAuth Client ID</b> type <b>Desktop</b></li>
-                        <li>Save the downloaded file as <code>credentials.json</code> in the project root</li>
-                        <li>Restart the app and click "Connect calendar"</li>
-                    </ol>
-                    <small>See README.md for details</small>
-                </div>
-            }
+        @if (!Assistant.CalendarConfigured)
+        {
+            <div class="setup">
+                <div class="setup-title">@Loc["help.googleTitle"]</div>
+                <ol>
+                    <li>@Loc["help.g1"]</li>
+                    <li>@Loc["help.g2"]</li>
+                    <li>@((MarkupString)WithCode(Loc["help.g3"]))</li>
+                    <li>@Loc["help.g4"]</li>
+                </ol>
+                <small>@Loc["help.readme"]</small>
+            </div>
+        }
+
+        <div class="side-foot">
+            <span class="tech">MaIN.NET · @Assistant.ModelName · Ollama</span>
         </div>
     </aside>
 
     <main class="chat">
-        <div class="messages" @ref="_messagesEl">
-            @foreach (var m in Assistant.Messages)
-            {
-                <div class="msg @(m.Role == ChatRole.User ? "user" : "bot")">
-                    @if (m.Role == ChatRole.Assistant)
-                    {
-                        <div class="avatar">AI</div>
-                    }
-                    <div class="bubble">
-                        <div class="text">@((MarkupString)Format(m.Text))</div>
-                        @if (m.Day is not null)
+        <header class="chat-head">
+            <div class="head-status">
+                @if (!Assistant.CalendarConfigured)
+                {
+                    <span class="pill off"><span class="dot"></span> @Loc["status.missingCreds"]</span>
+                }
+                else if (Assistant.CalendarConnected)
+                {
+                    <span class="pill ok"><span class="dot"></span> @Loc["status.connected"]</span>
+                }
+                else
+                {
+                    <button class="btn btn-primary sm" @onclick="Connect" disabled="@_connecting">
+                        @(_connecting ? Loc["btn.connecting"] : Loc["btn.connect"])
+                    </button>
+                }
+                @if (_connectError is not null)
+                {
+                    <span class="err">@_connectError</span>
+                }
+            </div>
+
+            <div class="lang-seg" role="group" aria-label="Language">
+                <button class="seg @(Loc.Lang == AppLang.Pl ? "active" : "")" @onclick="() => SetLang(AppLang.Pl)">PL</button>
+                <button class="seg @(Loc.Lang == AppLang.En ? "active" : "")" @onclick="() => SetLang(AppLang.En)">EN</button>
+            </div>
+        </header>
+
+        <div class="messages">
+            <div class="messages-inner">
+                @foreach (var m in Assistant.Messages)
+                {
+                    <div class="msg @(m.Role == ChatRole.User ? "user" : "bot")">
+                        @if (m.Role == ChatRole.Assistant)
                         {
-                            <DayTimeline Plan="m.Day" />
+                            <div class="avatar">@CalendarIcon</div>
                         }
+                        <div class="bubble">
+                            <div class="text">@((MarkupString)Format(m.Text))</div>
+                            @if (m.Day is not null)
+                            {
+                                <DayTimeline Plan="m.Day" />
+                            }
+                        </div>
                     </div>
-                </div>
-            }
-            @if (Assistant.Busy)
-            {
-                <div class="msg bot">
-                    <div class="avatar">AI</div>
-                    <div class="bubble typing"><span></span><span></span><span></span></div>
-                </div>
-            }
+                }
+
+                @if (Assistant.Busy)
+                {
+                    <div class="msg bot">
+                        <div class="avatar working">@CalendarIcon</div>
+                        <div class="bubble status">
+                            <span class="status-pulse"><i></i><i></i><i></i></span>
+                            <span class="status-text">@Loc[Assistant.StatusKey]</span>
+                        </div>
+                    </div>
+                }
+                <div @ref="_anchor"></div>
+            </div>
         </div>
 
         <div class="composer">
-            <input class="input" @bind="_input" @bind:event="oninput"
-                   @onkeydown="OnKey" placeholder="Type a message..." disabled="@Assistant.Busy" />
-            <button class="btn btn-primary send" @onclick="Send"
-                    disabled="@(Assistant.Busy || string.IsNullOrWhiteSpace(_input))">
-                Send
-            </button>
+            <div class="composer-box">
+                <input class="input" @bind="_input" @bind:event="oninput"
+                       @onkeydown="OnKey" placeholder="@Loc["composer.placeholder"]" disabled="@Assistant.Busy" />
+                <button class="btn btn-primary send" @onclick="Send"
+                        disabled="@(Assistant.Busy || string.IsNullOrWhiteSpace(_input))" aria-label="@Loc["btn.send"]">
+                    @SendIcon
+                </button>
+            </div>
         </div>
     </main>
 </div>
@@ -106,17 +129,32 @@
     private string _input = "";
     private bool _connecting;
     private string? _connectError;
-    private ElementReference _messagesEl;
+    private ElementReference _anchor;
 
-    protected override void OnInitialized() => Assistant.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Assistant.Changed += OnChanged;
+        Loc.Changed += OnChanged;
+    }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await JS.InvokeVoidAsync("calAssist.scrollToBottom", _anchor); }
+        catch { /* JS not ready during prerender — ignore */ }
+    }
 
     private async Task Send()
     {
         var text = _input.Trim();
-        if (string.IsNullOrEmpty(text) || Assistant.Busy) return;
         _input = "";
+        await SendText(text);
+    }
+
+    private async Task SendText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || Assistant.Busy) return;
         await Assistant.SendAsync(text);
     }
 
@@ -125,25 +163,27 @@
         if (e.Key == "Enter" && !e.ShiftKey) await Send();
     }
 
+    private void SetLang(AppLang lang) => Loc.Set(lang);
+
     private async Task Connect()
     {
         _connecting = true;
         _connectError = null;
-        try
-        {
-            await Assistant.ConnectCalendarAsync();
-        }
-        catch (Exception ex)
-        {
-            _connectError = ex.Message;
-        }
-        finally
-        {
-            _connecting = false;
-        }
+        try { await Assistant.ConnectCalendarAsync(); }
+        catch (Exception ex) { _connectError = ex.Message; }
+        finally { _connecting = false; }
     }
 
-    public void Dispose() => Assistant.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Assistant.Changed -= OnChanged;
+        Loc.Changed -= OnChanged;
+    }
+
+    // Wrap `credentials.json` (and similar) mentions in <code> for the setup steps.
+    private static string WithCode(string s) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            System.Net.WebUtility.HtmlEncode(s), @"(credentials\.json)", "<code>$1</code>");
 
     // Lightweight formatter: **bold**, *italic*, newlines -> <br>. Encode first for safety.
     private static string Format(string text)
@@ -154,4 +194,18 @@
         s = System.Text.RegularExpressions.Regex.Replace(s, @"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", "<em>$1</em>");
         return s;
     }
+
+    private static readonly MarkupString CalendarIcon = new(
+        """
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.2h18"/><path d="M8 2.8v3.2"/><path d="M16 2.8v3.2"/><path d="M7.5 13h2v2h-2z" fill="currentColor" stroke="none"/>
+        </svg>
+        """);
+
+    private static readonly MarkupString SendIcon = new(
+        """
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 12l15-7-7 15-2.5-5.5z"/>
+        </svg>
+        """);
 }
