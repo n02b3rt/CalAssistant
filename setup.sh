@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # CalAssistant environment setup for Linux / macOS.
-# Usage: ./setup.sh [--skip-build] [--model qwen3:4b]
+# Usage: ./setup.sh [--skip-build] [--model qwen3:1.7b]
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MODEL="qwen3:4b"
+MODEL="qwen3:1.7b"
 OLLAMA_URL="http://localhost:11434"
 SKIP_BUILD=0
 TOTAL_STEPS=7

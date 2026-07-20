@@ -124,6 +124,35 @@ public class CalendarService
         return mapped;
     }
 
+    /// <summary>
+    /// Returns timed events overlapping the [start, end) window. All-day events are ignored —
+    /// they don't block a specific meeting slot. Used to warn about double-booking before creating.
+    /// </summary>
+    public async Task<List<CalEvent>> GetConflictsAsync(DateTime start, DateTime end, CancellationToken ct = default)
+    {
+        EnsureConnected();
+        var dayStart = start.Date;
+        var dayEnd = end.Date.AddDays(1);
+
+        var req = _service!.Events.List("primary");
+        req.TimeMinDateTimeOffset = new DateTimeOffset(dayStart);
+        req.TimeMaxDateTimeOffset = new DateTimeOffset(dayEnd);
+        req.SingleEvents = true;
+        req.ShowDeleted = false;
+        req.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
+
+        var items = (await req.ExecuteAsync(ct)).Items ?? new List<Event>();
+        var conflicts = new List<CalEvent>();
+        foreach (var ev in items)
+        {
+            var e = Map(ev);
+            if (e.AllDay || e.Start is null || e.End is null) continue;
+            if (e.Start.Value < end && e.End.Value > start) // half-open overlap
+                conflicts.Add(e);
+        }
+        return conflicts;
+    }
+
     private void EnsureConnected()
     {
         if (_service is null)

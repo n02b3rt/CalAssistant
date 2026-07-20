@@ -4,10 +4,10 @@
 
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![MaIN.NET](https://img.shields.io/badge/MaIN.NET-10.1.0-blueviolet)](https://github.com/mobitouchOS/MaIN.NET)
-[![Ollama](https://img.shields.io/badge/Ollama-qwen3%3A4b-orange)](https://ollama.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-qwen3%3A1.7b-orange)](https://ollama.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Built with **Blazor Server (.NET 10)** and **[MaIN.NET](https://github.com/mobitouchOS/MaIN.NET)** — a local `qwen3:4b` model running through Ollama handles all natural language understanding via native **tool calling**. Google Calendar API handles the actual calendar operations.
+Built with **Blazor Server (.NET 10)** and **[MaIN.NET](https://github.com/mobitouchOS/MaIN.NET)** — a local `qwen3:1.7b` model running through Ollama handles all natural language understanding via native **tool calling**. Google Calendar API handles the actual calendar operations.
 
 ---
 
@@ -31,14 +31,22 @@ Talk to your Google Calendar in plain English:
 
 ```
 You → Blazor chat UI
-       └─ AssistantService
-            └─ qwen3:4b via Ollama  ←── tool calling (MaIN.NET manages the loop)
-                 ├─ list_day tool   →  CalendarService.GetDayAsync()
-                 └─ create_event tool → CalendarService.CreateEventAsync()
+       └─ AssistantService  (detects PL/EN · keeps full conversation history)
+            └─ qwen3:1.7b via Ollama  ←── tool calling (MaIN.NET manages the loop)
+                 ├─ list_day tool           →  CalendarService.GetDayAsync()
+                 ├─ check_availability tool  →  CalendarService.GetConflictsAsync()
+                 └─ create_event tool        →  conflict check → CalendarService.CreateEventAsync()
        └─ DayTimeline.razor renders the visual day view
 ```
 
-`qwen3:4b` supports native function/tool calling in Ollama — no JSON parsing hacks, no intent routers. The model decides when to call a tool and MaIN.NET handles the iteration loop automatically.
+`qwen3:1.7b` supports native tool calling in Ollama — no JSON parsing hacks, no intent routers. The model
+picks the tool and MaIN.NET runs the loop. Sensitive logic stays in C#:
+
+- **Multi-turn slot-filling** — vague requests ("schedule a meeting" / "zaplanuj spotkanie") trigger a
+  follow-up question instead of invented details.
+- **Conflict-aware** — `create_event` checks the slot first and refuses to double-book unless you confirm.
+- **Deterministic confirmations** — the "created X on …" line is built in C# so a small model can't misstate the date.
+- **Bilingual** — replies in Polish or English, matching what you wrote.
 
 ---
 
@@ -48,7 +56,7 @@ You → Blazor chat UI
 |---|---|
 | **.NET SDK 10** | `dotnet --version` |
 | **Ollama** | [ollama.com](https://ollama.com) |
-| **qwen3:4b model** | `ollama pull qwen3:4b` |
+| **qwen3:1.7b model** | `ollama pull qwen3:1.7b` |
 | **Google account** | For Calendar API access |
 
 ---
@@ -77,7 +85,7 @@ The setup script will:
 1. Check / install **.NET SDK 10**
 2. Check / install **Ollama**
 3. Start the Ollama server if it's not running
-4. Pull the **`qwen3:4b`** model if missing
+4. Pull the **`qwen3:1.7b`** model if missing
 5. Create `token-store/` and warn if `credentials.json` is absent
 6. `dotnet restore` + `dotnet build`
 
@@ -95,7 +103,7 @@ cd CalAssistant
 
 **2. Pull the model:**
 ```bash
-ollama pull qwen3:4b
+ollama pull qwen3:1.7b
 ```
 
 **3. Set up Google Calendar credentials** (one-time, ~10 min) — see [Google OAuth Setup](#-google-oauth-setup) below.
@@ -115,7 +123,7 @@ Open **http://localhost:5136**, click **Connect calendar** and sign in to Google
 
 ```bash
 # 1. Make sure Ollama is running on the host with the model
-ollama pull qwen3:4b
+ollama pull qwen3:1.7b
 ollama serve
 
 # 2. Start app + gateway
@@ -233,7 +241,7 @@ All configuration can be overridden via environment variables:
 |---|---|
 | Frontend | Blazor Server, .NET 10, SignalR |
 | LLM framework | [MaIN.NET](https://github.com/mobitouchOS/MaIN.NET) 10.1.0 |
-| Local LLM | qwen3:4b via [Ollama](https://ollama.com) |
+| Local LLM | qwen3:1.7b via [Ollama](https://ollama.com) |
 | Calendar | Google Calendar API v3 (`Google.Apis.Calendar.v3`) |
 | Containerisation | Docker, Docker Compose |
 
@@ -245,7 +253,7 @@ All configuration can be overridden via environment variables:
 |---|---|
 | **Missing credentials.json** in the sidebar | Place `credentials.json` in the project root (see OAuth setup) |
 | **403 / access_denied** on Google login | Add your Gmail as a *Test user* in OAuth consent screen |
-| **Model doesn't respond** | Run `ollama list` — make sure `qwen3:4b` is listed; `ollama serve` must be running |
+| **Model doesn't respond** | Run `ollama list` — make sure `qwen3:1.7b` is listed; `ollama serve` must be running |
 | **Docker: can't reach Ollama** | Use `docker compose up` — Ollama runs in its own container now |
 | **NU1902/NU1903/NU1904 warnings** on build | Transitive vulnerability warnings from MaIN.NET dependencies; safe to ignore in dev |
 

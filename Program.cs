@@ -5,17 +5,21 @@ using MaIN.Domain.Configuration;
 using MaIN.Domain.Models.Abstract;
 using Microsoft.AspNetCore.HttpOverrides;
 
-// qwen3:4b is not in MaIN.NET's built-in ModelRegistry — register it at startup.
-ModelRegistry.RegisterOrReplace(
-    new GenericCloudModel(AssistantService.ModelName, BackendType.Ollama, "Qwen3 4B (Ollama)"));
-
 var builder = WebApplication.CreateBuilder(args);
 
 // Blazor Server (interactive)
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// MaIN.NET → local Ollama (qwen3:4b)
+// Local model (configurable). Default: qwen3:1.7b — fits fully in 4 GB VRAM (fast, GPU-only).
+// Override with Assistant:Model (appsettings) or Assistant__Model (env var).
+var modelName = builder.Configuration["Assistant:Model"] ?? AssistantService.DefaultModel;
+
+// The model is not in MaIN.NET's built-in ModelRegistry — register it at startup.
+ModelRegistry.RegisterOrReplace(
+    new GenericCloudModel(modelName, BackendType.Ollama, $"{modelName} (Ollama)"));
+
+// MaIN.NET → local Ollama
 builder.Services.AddMaIN(builder.Configuration, options =>
 {
     options.BackendType = BackendType.Ollama;

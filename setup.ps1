@@ -4,7 +4,7 @@
     CalAssistant environment setup for Windows.
 
 .DESCRIPTION
-    Checks and installs prerequisites (.NET SDK 10, Ollama, qwen3:4b model),
+    Checks and installs prerequisites (.NET SDK 10, Ollama, qwen3:1.7b model),
     prepares local folders, and builds the project.
 
 .EXAMPLE
@@ -13,7 +13,7 @@
 #>
 param(
     [switch]$SkipBuild,
-    [string]$Model = "qwen3:4b",
+    [string]$Model = "qwen3:1.7b",
     [string]$OllamaUrl = "http://localhost:11434"
 )
 

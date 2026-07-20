@@ -7,19 +7,28 @@ Canonical guide for AI agents (Cursor, Claude Code, Copilot, etc.) and humans wo
 
 ## What this project is
 
-A web-based **Google Calendar chat assistant** — users talk to it in English.
+A web-based **Google Calendar chat assistant**. Users talk to it in **Polish or English** and it
+replies in the same language.
 
 | User says… | Result |
 |---|---|
-| "what do I have today?" | Fetches events → day timeline (`DayTimeline`) + summary |
-| "schedule a meeting with Kate tomorrow at 3pm" | Creates a Google Calendar event |
-| "remind me about meds at 9pm" | Creates an event with a popup reminder |
+| "co mam dziś do zrobienia?" / "what do I have today?" | Fetches events → visual day timeline (`DayTimeline`) + summary |
+| "umów spotkanie z Kasią jutro o 15" | Checks the slot is free, then creates the event (asks first if details are missing) |
+| "przypomnij mi o lekach o 21" | Creates an event with a popup reminder |
 
-- **LLM:** local `qwen3:4b` via [Ollama](https://ollama.com) — conversations never leave your machine.
+- **LLM:** local **`qwen3:1.7b`** via [Ollama](https://ollama.com) — conversations never leave your machine.
 - **LLM framework:** [MaIN.NET](https://github.com/mobitouchOS/MaIN.NET) 10.1.0 (NuGet) with native **tool calling**.
 - **UI:** Blazor Server (.NET 10), Interactive Server mode (SignalR).
-- **Calendar:** Google Calendar API v3, Desktop app OAuth.
-- **License:** MIT — see `LICENSE`.
+- **Calendar:** Google Calendar API v3, Desktop-app OAuth.
+
+### Why `qwen3:1.7b` (not `qwen3:4b` or `gemma3:4b`)
+
+- **`gemma3:4b`** does **not** support tool calling in Ollama (`does not support tools`) — ruled out.
+- **`qwen3:4b`** supports tools but is 2.5 GB; on a 4 GB-VRAM GPU it runs **~33% CPU / 67% GPU** (spills, slow).
+- **`qwen3:1.7b`** supports tools and fits **100% on GPU** in 4 GB → fast. This is the default.
+
+The model is **configurable** — see [Configuration](#configuration). Anything that supports Ollama tool
+calling works (e.g. set `Assistant:Model` to `qwen3:4b` for higher quality if you have the VRAM).
 
 ---
 
@@ -27,76 +36,59 @@ A web-based **Google Calendar chat assistant** — users talk to it in English.
 
 | Layer | Technology | Version / notes |
 |---|---|---|
-| Runtime | .NET | 10.0 (`net10.0`) |
+| Runtime | .NET | 10.0 (`net10.0`), SDK at `C:\Program Files\dotnet\dotnet.exe` |
 | UI | Blazor Web App | Interactive Server |
 | LLM framework | MaIN.NET | 10.1.0 |
-| Model | `qwen3:4b` | Ollama, `http://localhost:11434` |
+| Model | `qwen3:1.7b` (default) | Ollama, `http://localhost:11434` |
 | Calendar | Google.Apis.Calendar.v3 | Desktop OAuth |
-| Container | Docker + Compose | 3 services: gateway (:8080), app, ollama |
+| Container | Docker + Compose | gateway (:8080), app, optional bundled ollama |
 
-### External dependencies (not in repo)
-
-Run the setup script — it handles everything automatically:
-
-```powershell
-# Windows
-.\setup.ps1
-
-# Linux / macOS
-chmod +x setup.sh && ./setup.sh
-```
-
-Or manually:
-
-```bash
-ollama pull qwen3:4b
-ollama list          # must show qwen3:4b
-```
-
-`credentials.json` from Google Cloud Console — see `README.md`.
+External deps: `ollama pull qwen3:1.7b` (or run `setup.ps1` / `setup.sh`), and `credentials.json` from
+Google Cloud (see `README.md`).
 
 ---
 
 ## Architecture
 
-`qwen3:4b` supports **tool calling** in Ollama. There is no manual intent router or JSON parsing from the model — MaIN.NET manages the tool-call loop.
+`qwen3:1.7b` supports **native tool calling**. There is no manual intent router / JSON parsing — MaIN.NET
+runs the tool-call loop. Deterministic, sensitive operations (reading/writing the calendar, conflict
+detection, confirmations) live in **C#**; the model only understands intent, picks tools, and phrases replies.
 
 ```
 User (Chat.razor)
-    │
-    ▼
-AssistantService.SendAsync()
-    │
-    ▼
+   │
+   ▼
+AssistantService.SendAsync(userText)          // appends user msg, raises Busy
+   │
+   ▼
 AssistantService.RunWithToolsAsync()
-    │
-    ├─► IMaINHub.Chat()
-    │       .WithModel("qwen3:4b")
-    │       .WithMessage(userText)
-    │       .WithSystemPrompt(...)
-    │       .WithTools(list_day, create_event)
-    │       .CompleteAsync()
-    │
-    ├─► [tool: list_day]      → CalendarService.GetDayAsync()
-    ├─► [tool: create_event]  → CalendarService.CreateEventAsync()
-    │
-    ▼
-Model response (English text)
-    │
-    ▼
-Chat.razor renders DayTimeline when message carries a DayPlan
+   ├─ detect language (PL/EN)                  // deterministic, forces reply language
+   ├─ build conversation history               // full multi-turn context (see gotcha #1)
+   ├─ IMaINHub.Chat()
+   │     .WithModel("qwen3:1.7b")
+   │     .WithMessages(history)                // history LAST item = current user turn
+   │     .WithSystemPrompt(rules)
+   │     .WithInferenceParams(temp 0.2, max_tokens 500, think=false)
+   │     .WithTools(list_day, check_availability, create_event)
+   │     .CompleteAsync(cancellationToken: 60s timeout)
+   │
+   ├─ [tool] list_day          → CalendarService.GetDayAsync()      → attaches DayPlan to the message
+   ├─ [tool] check_availability→ CalendarService.GetConflictsAsync()
+   └─ [tool] create_event      → conflict check, then CalendarService.CreateEventAsync()
+   │
+   ▼
+Reply (in the user's language). Created-event confirmations are deterministic (not model prose).
+Chat.razor renders DayTimeline when the message carries a DayPlan.
 ```
 
 ### Responsibility split
 
 | Component | Responsibility |
 |---|---|
-| `AssistantService` | Chat orchestration, MaIN tool registration, conversation state |
-| `CalendarService` | **Only** place with Google Calendar operations (OAuth, read, write) |
-| `DayTimeline.razor` | Day visualization from real API data — not model hallucinations |
-| LLM model | Language understanding, tool selection, response wording |
-
-The model **never** touches Google API directly — only through C#-registered tools.
+| `AssistantService` | Orchestration, tool registration, conversation state, language, generation limits (Scoped) |
+| `CalendarService` | **Only** place with Google Calendar operations — OAuth, read, create, conflict lookup (Singleton) |
+| `DayTimeline.razor` | Day visualization from real API data — never from model output |
+| LLM model | Language understanding, tool selection, wording |
 
 ---
 
@@ -105,35 +97,26 @@ The model **never** touches Google API directly — only through C#-registered t
 ```
 CalAssistant/
 ├── setup.ps1 / setup.sh          # automated environment setup
-├── Program.cs                    # DI, ASP.NET pipeline, AddMaIN(Ollama), model registration
-├── CalAssistant.csproj           # NuGet dependencies
-├── Dockerfile                    # multi-stage build (SDK → aspnet runtime)
-├── docker-compose.yml            # port 5136:8080, OAuth volumes, Ollama host
+├── Program.cs                    # DI, ASP.NET pipeline, AddMaIN(Ollama), model registration from config
+├── CalAssistant.csproj
+├── Dockerfile                    # multi-stage (SDK → aspnet runtime)
+├── docker-compose.yml            # gateway(:8080) + app + optional bundled ollama (profile)
+├── docker-compose.gpu.yml        # NVIDIA override for bundled ollama
+├── docker/nginx.conf             # reverse proxy (WebSocket for Blazor SignalR)
 ├── .dockerignore / .gitignore
-├── LICENSE                       # MIT
-├── README.md                     # user documentation
+├── README.md                     # user documentation (incl. Google OAuth)
 ├── CLAUDE.md                     # shortcuts for Claude Code → points here
 │
-├── Models/
-│   └── AssistantModels.cs        # ChatMessage, CalEvent, DayPlan
-│
+├── Models/AssistantModels.cs     # ChatMessage, CalEvent, DayPlan
 ├── Services/
 │   ├── AssistantService.cs       # orchestrator + tool calling (Scoped)
 │   └── CalendarService.cs        # Google Calendar API (Singleton)
-│
 ├── Components/
-│   ├── Pages/
-│   │   ├── Chat.razor(.css)      # main page "/"
-│   │   ├── Error.razor
-│   │   └── NotFound.razor
+│   ├── Pages/Chat.razor(.css)    # main page "/"
 │   ├── DayTimeline.razor(.css)   # day timeline view
-│   ├── Layout/                   # MainLayout, ReconnectModal
-│   ├── App.razor, Routes.razor
-│   └── _Imports.razor
-│
+│   └── Layout/, App.razor, Routes.razor, _Imports.razor
 ├── wwwroot/app.css               # dark theme, CSS variables
-├── appsettings.json
-├── Properties/launchSettings.json
+├── appsettings.json              # Assistant:Model = qwen3:1.7b
 │
 ├── credentials.json              # LOCAL ONLY — never commit
 └── token-store/                  # OAuth token cache — never commit
@@ -141,192 +124,120 @@ CalAssistant/
 
 ---
 
-## Key types (`Models/AssistantModels.cs`)
+## MaIN tools (`AssistantService.BuildTools`)
 
-| Type | Role |
-|---|---|
-| `ChatMessage` | Single chat bubble; optionally carries `Day` (DayPlan) or `CreatedEvent` |
-| `DayPlan` | Day plan: date + list of `CalEvent` |
-| `CalEvent` | Simplified event (title, start, end, location) |
-| `ChatRole` | `User` / `Assistant` |
+| Tool | Parameters | Calls | Notes |
+|---|---|---|---|
+| `list_day` | `date` (YYYY-MM-DD) | `CalendarService.GetDayAsync` | Attaches `DayPlan` → UI renders `DayTimeline` |
+| `check_availability` | `start`, `end` (ISO) | `CalendarService.GetConflictsAsync` | Returns FREE / BUSY |
+| `create_event` | `title`, `start`, `end?`, `location?`, `reminder_minutes?`, `force?` | conflict check → `CalendarService.CreateEventAsync` | Returns `CONFLICT` (and does NOT create) unless `force=true` |
 
----
-
-## MaIN tools (`AssistantService.RunWithToolsAsync`)
-
-| Tool | Parameters | Calls |
-|---|---|---|
-| `list_day` | `date` (YYYY-MM-DD) | `CalendarService.GetDayAsync(date)` |
-| `create_event` | `title`, `start`, `end?`, `location?`, `reminder_minutes?` | `CalendarService.CreateEventAsync(...)` |
-
-Config: `WithToolChoice("auto")`, `WithMaxIterations(5)`, temperature `0.4f`.
-
-After `list_day` runs, the resulting `DayPlan` is attached to `ChatMessage.Day` — UI renders `DayTimeline`.
+Config: `WithToolChoice("auto")`, `WithMaxIterations(5)`, temperature `0.2`, `max_tokens 500`, `think=false`.
 
 ---
 
-## DI and lifetimes
+## ⚠️ MaIN.NET / small-model gotchas (read before editing `AssistantService`)
 
-| Service | Registration | Why |
-|---|---|---|
-| `CalendarService` | `Singleton` | Single user, single OAuth token |
-| `AssistantService` | `Scoped` | Conversation state per Blazor circuit (SignalR) |
-| `IMaINHub` | via `AddMaIN()` | MaIN.NET hub |
+### 1. Conversation MUST start with a user message  *(most important)*
+`WithSystemPrompt` inserts a `System` message at index 0. If the next message is an assistant turn
+(e.g. the UI greeting), the conversation becomes `system → assistant → …`, and **qwen3:1.7b stops
+emitting tool calls** — it just replies with text (events silently don't get created).
+`BuildConversation()` therefore **drops the greeting and any leading assistant turns** so the history
+starts on a user turn. Do not re-add the greeting to the model context.
+
+### 2. Disable Qwen3 "thinking" for speed
+Qwen3 reasons by default. Left on (no token cap) a single turn took **30–75 s** and could run away.
+We send `think=false` via `OllamaInferenceParams.AdditionalParams` (Ollama's `ApplyBackendParams` only
+maps Temperature/MaxTokens/TopP/TopK/NumCtx/NumGpu; extra keys go through `AdditionalParams`). Result: ~3–10 s/call.
+
+### 3. Bound generation
+`MaxTokens = 500` **and** a `CancellationTokenSource(60s)` on `CompleteAsync`. A small model can otherwise
+loop and hit the 100 s HttpClient timeout. The cancellation is caught in `SendAsync` → friendly retry message.
+
+### 4. Small models misstate details in prose
+qwen3:1.7b once confirmed a July event as "21 **maja**". So **created-event confirmations are generated
+deterministically in C#** (`FallbackText`) from the real `CalEvent`, not from the model's words.
+
+### 5. Reply language
+A tiny model ignores "reply in the user's language". We **detect PL/EN in C#** (`DetectLanguage`) and put an
+explicit "reply ONLY in {language}" line in the system prompt.
+
+### 6. Chain order
+`WithSystemPrompt` is on `IChatConfigurationBuilder` — call it after `WithModel(...).WithMessages(...)`,
+not before, or you get `CS1061`.
+
+### 7. Model registration
+`WithModel(id)` needs the id in `ModelRegistry`. MaIN 10.1.0 has no constant for `qwen3:1.7b`, so
+`Program.cs` registers it: `ModelRegistry.RegisterOrReplace(new GenericCloudModel(modelName, BackendType.Ollama, ...))`.
+
+### 8. `Models` name clash
+`MaIN.Domain.Models.Models` vs our `CalAssistant.Models`. In `AssistantService` we reference MaIN types
+fully or via `MaIN.Domain.Entities` (`Message`, `MessageType`).
 
 ---
 
-## Configuration (env / appsettings)
+## Configuration
 
-| Key | Default | Description |
-|---|---|---|
-| `MaIN__OllamaBaseUrl` | `http://localhost:11434` | Ollama endpoint; in Docker Compose: `http://ollama:11434` |
-| `Google__CredentialsPath` | `credentials.json` | Path to OAuth credentials |
-| `EnableHttpsRedirection` | `false` | `true` only behind a TLS reverse proxy |
-| `ASPNETCORE_URLS` | `http://+:8080` (Docker) | Bind address |
+| Key (appsettings) | Env var | Default | Description |
+|---|---|---|---|
+| `Assistant:Model` | `Assistant__Model` | `qwen3:1.7b` | Ollama model (must support tool calling) |
+| `MaIN__OllamaBaseUrl` | `MaIN__OllamaBaseUrl` | `http://localhost:11434` | Ollama endpoint; Docker bundled: `http://ollama:11434` |
+| `EnableHttpsRedirection` | same | `false` | `true` only behind a TLS reverse proxy |
+| `ASPNETCORE_URLS` | same | `http://+:8080` (Docker) | Bind address |
 
 ---
 
 ## Running
 
-### Automated setup (recommended)
-
 ```powershell
-# Windows
-.\setup.ps1
+# Local dev
+dotnet run                       # → http://localhost:5136, click "Connect calendar"
 
-# Linux / macOS
-chmod +x setup.sh && ./setup.sh
+# Docker (app in container, Ollama on host = GPU)
+docker compose up --build        # → http://localhost:8080
+
+# Docker full stack (Ollama in a container too; add gpu.yml for NVIDIA)
+docker compose --profile bundled-ollama up --build
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bundled-ollama up --build
 ```
 
-The script checks/installs .NET 10, Ollama, pulls `qwen3:4b`, creates folders, and builds the project.
-
-### Local dev
-
-```powershell
-dotnet run
-# → http://localhost:5136
-```
-
-### Docker (full stack)
-
-```powershell
-docker compose up --build
-# → http://localhost:8080  (nginx gateway)
-```
-
-Stack:
-- **gateway** — nginx, public port 8080, WebSocket proxy for Blazor SignalR
-- **calassistant** — app container (internal port 8080, not exposed to host)
-- **ollama** — LLM with persistent volume `ollama_data`
-- **ollama-init** — one-shot `ollama pull qwen3:4b`
-
-Requirements:
-- `./credentials.json` and `./token-store` mounted as volumes
-- First run downloads the model (~2.5 GB) — be patient
-
----
-
-## MaIN.NET gotchas (read before editing `AssistantService`)
-
-### 1. Call chain order
-
-`WithSystemPrompt` is on `IChatConfigurationBuilder` — **only after** `WithMessage`:
-
-```csharp
-// correct
-_hub.Chat()
-    .WithModel(ModelName)
-    .WithMessage(userText)
-    .WithSystemPrompt(system)
-    .WithTools(tools)
-    .CompleteAsync();
-
-// wrong — CS1061: WithSystemPrompt doesn't exist on IChatMessageBuilder
-_hub.Chat()
-    .WithModel(ModelName)
-    .WithSystemPrompt(system)   // compile error
-    .WithMessage(userText)
-```
-
-### 2. Model registration in ModelRegistry
-
-`WithModel()` requires the model to be registered in `ModelRegistry`.
-MaIN.NET 10.1.0 has no built-in constant for `qwen3:4b` (only `qwen3:8b`, `qwen3:14b`, etc.).
-
-**Already handled in `Program.cs`:**
-
-```csharp
-ModelRegistry.RegisterOrReplace(
-    new GenericCloudModel(AssistantService.ModelName, BackendType.Ollama, "Qwen3 4B (Ollama)"));
-```
-
-### 3. `qwen3:4b` vs `gemma3:4b`
-
-The project originally used `gemma3:4b` with a manual JSON intent router (gemma doesn't support tool calling in Ollama).
-**We now use only `qwen3:4b` + tool calling.** Do not revert to the intent router without an explicit decision.
+GPU check: `ollama ps` should show the model at `100% GPU`. On the host (Windows) Ollama uses the GPU
+automatically; in a bundled container you need the NVIDIA container toolkit + `docker-compose.gpu.yml`.
 
 ---
 
 ## Google Calendar OAuth
-
-Summary — full instructions in `README.md`:
-
+Summary — full steps in `README.md`:
 1. Google Cloud Console → project → enable **Calendar API**.
 2. OAuth consent screen (External) → add yourself as **Test user**.
 3. Credentials → **OAuth client ID → Desktop app** → download JSON.
-4. Save as `credentials.json` in the project root.
-5. Run app → click **Connect calendar** → token saved in `token-store/`.
-
-**Never commit:** `credentials.json`, `token-store/`.
-
----
-
-## Code conventions
-
-- UI language, model responses, and code comments: **English**.
-- Calendar operations only in `CalendarService` — not in Blazor components or tool lambdas beyond delegation.
-- Model name: constant `AssistantService.ModelName` — single source of truth.
-- Don't add tests or abstractions "just in case" — only when requested or they cover real behavior.
-- Don't commit generated files (`bin/`, `obj/`) or secrets.
+4. Save as `credentials.json` in the project root (watch out for `credentials.json.json` if Windows hides extensions).
+5. Run app → **Connect calendar** → token cached in `token-store/`. **Never commit** `credentials.json` or `token-store/`.
 
 ---
 
 ## Verification after changes
-
-1. `dotnet build` — zero errors (NU190x from MaIN are warnings, not blockers).
-2. `dotnet run` → send `what can you do?` → response without Google (tests MaIN→Ollama).
-3. With calendar connected: `what do I have today?` → `DayTimeline` appears.
-4. Docker: `docker compose up --build` → `http://localhost:8080`.
-
----
-
-## Troubleshooting
-
-| Problem | Cause / fix |
-|---|---|
-| `ModelNotRegisteredException` | Check `Program.cs` model registration |
-| `CS1061 WithSystemPrompt` | Wrong chain order — `WithMessage` before `WithSystemPrompt` |
-| Model doesn't respond | `ollama list`, `ollama serve`, check `MaIN__OllamaBaseUrl` |
-| Docker: no Ollama | Run full stack: `docker compose up --build` (Ollama is a container now) |
-| Missing credentials.json | Place file in project root or mount in Docker volume |
-| 403 on Google login | Add Gmail as Test user in OAuth consent screen |
-| `rpc error ... EOF` on docker build | Restart Docker Desktop, `docker builder prune -af` |
-| Setup script fails on .NET | Install .NET 10 SDK manually |
+1. `dotnet build` — zero errors (NU190x from MaIN are warnings).
+2. `dotnet run` → send `co potrafisz?` → replies in Polish (tests MaIN→Ollama, no Google needed).
+3. Connect calendar → `co mam jutro?` → `DayTimeline` renders; `umów spotkanie z X jutro o 15` creates it
+   (and warns on a conflicting slot); `zaplanuj spotkanie` alone asks for missing details.
 
 ---
 
-## TODO
+## Roadmap / TODO
 
-- [ ] Tools `update_event` / `delete_event`.
-- [ ] Streaming responses (`CompleteAsync(changeOfValue: …)`).
-- [ ] Week view / date range.
-- [ ] Multi-user support (today singleton = one user).
-- [ ] Conflict detection on `create_event`.
+- [ ] `update_event` / `delete_event` tools ("przełóż spotkanie na 17", "odwołaj call").
+- [ ] Streaming replies (`CompleteAsync(changeOfValue: …)`) for a live-typing feel.
+- [ ] Week / date-range view.
+- [ ] Localize `DayTimeline` static labels (currently English: "event", "booked", "Free day", "Up next").
+- [ ] Smarter relative-date parsing fallback in C# (belt-and-suspenders for the model).
+- [ ] Multi-user support (today `CalendarService` is a singleton = one user/token).
+- [ ] Recurring events, time-zone awareness, natural-language reminders ("na godzinę przed").
+
+Done recently: multi-turn memory, slot-filling, conflict detection, PL/EN, GPU-fit model, latency bounds.
 
 ---
 
 ## Links
-
-- MaIN.NET: https://github.com/mobitouchOS/MaIN.NET
-- MaIN docs: https://www.usemain.net
+- MaIN.NET: https://github.com/mobitouchOS/MaIN.NET · docs: https://www.usemain.net
 - Ollama: https://ollama.com
