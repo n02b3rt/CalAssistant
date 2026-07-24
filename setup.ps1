@@ -13,13 +13,14 @@
 #>
 param(
     [switch]$SkipBuild,
+    [switch]$Run,
     [string]$Model = "qwen3:1.7b",
     [string]$OllamaUrl = "http://localhost:11434"
 )
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
-$TotalSteps = 7
+$TotalSteps = 6
 $Step = 0
 
 function Write-Title {
@@ -30,7 +31,7 @@ function Write-Title {
 }
 
 function Write-Step([string]$Message) {
-    script:Step++
+    $script:Step++
     Write-Host ("[{0}/{1}] {2}" -f $Step, $TotalSteps, $Message) -ForegroundColor Yellow
 }
 
@@ -153,8 +154,8 @@ function Ensure-ProjectFolders {
 
     $creds = Join-Path $Root "credentials.json"
     if (-not (Test-Path $creds)) {
-        Write-WarnLine "credentials.json not found — Google Calendar won't work until you add it."
-        Write-WarnLine "See README.md → Google OAuth Setup."
+        Write-WarnLine "credentials.json not found - Google Calendar won't work until you add it."
+        Write-WarnLine "See README.md -> Google OAuth Setup."
     }
     else {
         Write-Ok "credentials.json found"
@@ -206,4 +207,15 @@ Ensure-OllamaRunning
 Ensure-Model -ModelName $Model
 Ensure-ProjectFolders
 Ensure-Build
-Write-Summary
+
+if ($Run) {
+    Write-Host ""
+    Write-Host "  Starting the app on http://localhost:5136 ..." -ForegroundColor Cyan
+    Write-Host "  (Ctrl+C to stop)" -ForegroundColor DarkGray
+    Write-Host ""
+    Push-Location $Root
+    try { dotnet run -c Release } finally { Pop-Location }
+}
+else {
+    Write-Summary
+}
